@@ -1,0 +1,14 @@
+(lang dune 3.16)
+
+(name stdlib320)
+
+(generate_opam_files true)
+
+(authors "CAS CS 320 Course Staff")
+
+(maintainers "CAS CS 320 Course Staff")
+
+(package
+ (name stdlib320)
+ (synopsis "Standard Library for CAS CS 320")
+ (depends ocaml dune))
