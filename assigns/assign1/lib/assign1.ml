@@ -12,8 +12,6 @@ let is_perfect n =
 (*problem 2: similar to coin change problem*)
 let rec make_list n value =
   if n = 0 then [] else value :: make_list (n - 1) value;;
-
-(* Custom function to update an element at a given index in a list *)
 let rec update_list lst index new_value =
   match lst with
   | [] -> []
