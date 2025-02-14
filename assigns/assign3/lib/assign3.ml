@@ -20,7 +20,16 @@ let rec ntree_of_tree = function
 
 
 
-let fib3_tail (_inits : int * int * int) (_n : int) : int = assert false
+let fib3_tail ((a, b, c) : int * int * int) (n : int) : int =
+  let rec aux n prev3 prev2 prev1 =
+    if n = 0 then prev3
+    else if n = 1 then prev2
+    else if n = 2 then prev1
+    else aux (n - 1) prev2 prev1 (prev3 + prev2 + prev1)
+  in
+  aux n a b c
+      
+      
 
 let file_tree (_root : string) (_paths : string list) : string ntree = assert false
 
