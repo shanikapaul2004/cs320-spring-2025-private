@@ -29,6 +29,7 @@ let fib3_tail ((a, b, c) : int * int * int) (n : int) : int =
   in
   aux n a b c
 
+ 
   let file_tree (root : string) (paths : string list) : string ntree =
     (* Helper function: Finds the next '/' index manually *)
     let find_next_slash (path : string) (start : int) : int option =
@@ -66,17 +67,40 @@ let fib3_tail ((a, b, c) : int * int * int) (n : int) : int =
   
     (* Build the tree by inserting each path *)
     List.fold_left (fun acc path -> insert_path acc (split_path path)) (Node (root, [])) paths
-  
-  
-  
 
   
-type expr =
-  | Num of int
-  | Var of string
-  | Add of expr * expr
-  | Mul of expr * expr
-
-let subst (_e1 : expr) (_x : string) (_e2 : expr) : expr = assert false
-
-let string_of_expr (_e : expr) : string = assert false
+    type expr =
+    | Num of int
+    | Var of string
+    | Add of expr * expr
+    | Mul of expr * expr
+  
+  (* Substitutes occurrences of variable x with expression e1 in expression e2 *)
+  let rec subst (e1 : expr) (x : string) (e2 : expr) : expr =
+    match e2 with
+    | Num n -> Num n
+    | Var v -> if v = x then e1 else Var v
+    | Add (sub1, sub2) -> Add (subst e1 x sub1, subst e1 x sub2)
+    | Mul (sub1, sub2) -> Mul (subst e1 x sub1, subst e1 x sub2)
+  
+  (* Converts an expr to its string representation *)
+  let rec string_of_expr (e : expr) : string =
+    match e with
+    | Num n -> string_of_int n
+    | Var v -> v
+    | Add (e1, e2) ->
+        string_of_expr e1 ^ " + " ^ string_of_expr e2
+    | Mul (e1, e2) ->
+        let s1 =
+          match e1 with
+          | Add _ -> "(" ^ string_of_expr e1 ^ ")"
+          | _ -> string_of_expr e1
+        in
+        let s2 =
+          match e2 with
+          | Add _ -> "(" ^ string_of_expr e2 ^ ")"
+          | _ -> string_of_expr e2
+        in
+        s1 ^ " * " ^ s2
+  
+  
