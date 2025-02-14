@@ -1,9 +1,24 @@
+open Stdlib320 
 
 type 'a tree =
   | Leaf
   | Node2 of 'a * 'a tree * 'a tree
 
-let ntree_of_tree (_t : 'a tree) : 'a ntree option = assert false
+let rec ntree_of_tree = function
+  | Leaf -> None
+  | Node2 (v, left, right) ->
+      let children =
+        let cl = ntree_of_tree left in
+        let cr = ntree_of_tree right in
+        match (cl, cr) with
+        | (None, None) -> []
+        | (Some l, None) -> [l]
+        | (None, Some r) -> [r]
+        | (Some l, Some r) -> [l; r]
+      in
+      Some (Node (v, children))
+
+
 
 let fib3_tail (_inits : int * int * int) (_n : int) : int = assert false
 
