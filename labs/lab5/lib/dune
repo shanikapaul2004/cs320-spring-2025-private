@@ -1,0 +1,3 @@
+(library
+ (public_name lab5)
+ (flags (:standard -w -27 -w -32 -w -33)))
