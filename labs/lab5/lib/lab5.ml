@@ -132,9 +132,14 @@ let string_of_interval (i : interval) : string =
 
 type schedule = interval list
 
-let is_empty (i : interval) : bool = assert false
+let is_empty (i : interval) : bool =
+  compare_time i.start_time i.end_time >= 0
 
-let compare_interval (i1 : interval) (i2 : interval) : int = assert false
+let compare_interval (i1 : interval) (i2 : interval) : int =
+  let cd = compare_day i1.day i2.day in
+  if cd = 0
+  then compare_time i1.start_time i2.start_time
+  else cd
 
 let intersect_i_i (i1: interval) (i2: interval) : interval option = assert false
 
@@ -144,4 +149,15 @@ let intersect_s_s (s1 : schedule) (s2: schedule) : schedule = assert false
 
 let intersect_schedules (s : schedule list) : schedule = assert false
 
-let interval_of_string_opt (s : string) : interval option = assert false
+let interval_of_string_opt (s : string) : interval option =
+  let day = day_of_string_opt (String.sub s 0 2) in
+  let s = String.trim (String.sub s 2 (String.length s - 2)) in
+  if (String.length s = 12) && (String.sub s 5 2 = "--")
+  then
+    let start_time = time_of_string_opt (String.sub s 0 5) in
+    let end_time = time_of_string_opt (String.sub s 7 5) in
+    match day, start_time, end_time with
+    | Some day, Some start_time, Some end_time ->
+       Some {day;start_time;end_time}
+    | _ -> None
+  else None
