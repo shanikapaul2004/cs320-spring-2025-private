@@ -21,8 +21,25 @@ type 'a error =
 
 let guard b error = if b then Error error else Ok ()
 
-let eval (e : 'a expr) : (int, 'a error) result =
-  assert false
+let rec eval (e : 'a expr) : (int, 'a error) result =
+  let ( let* ) = Result.bind in
+  
+  match e.expr with
+  | Num n -> Ok n
+  | Op (op, e1, e2) ->
+      let* v1 = eval e1 in
+      let* v2 = eval e2 in
+      
+      match op with
+      | Add -> Ok (v1 + v2)
+      | Sub -> Ok (v1 - v2)
+      | Mul -> Ok (v1 * v2)
+      | Div ->
+          let* _ = guard (v2 = 0) {error = DivByZero; meta = e.meta} in
+          Ok (v1 / v2)
+      | Pow ->
+          let* _ = guard (v2 < 0) {error = NegExp; meta = e.meta} in
+          Ok (int_of_float (float_of_int v1 ** float_of_int v2))
 
 exception ListTooShort
 exception InvalidArg
