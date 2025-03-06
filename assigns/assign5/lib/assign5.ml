@@ -35,11 +35,15 @@ let rec eval (e : 'a expr) : (int, 'a error) result =
       | Sub -> Ok (v1 - v2)
       | Mul -> Ok (v1 * v2)
       | Div ->
-          let* _ = guard (v2 = 0) {error = DivByZero; meta = e.meta} in
+          let* () = guard (v2 = 0) {error = DivByZero; meta = e.meta} in
           Ok (v1 / v2)
       | Pow ->
-          let* _ = guard (v2 < 0) {error = NegExp; meta = e.meta} in
-          Ok (int_of_float (float_of_int v1 ** float_of_int v2))
+          let* () = guard (v2 < 0) {error = NegExp; meta = e.meta} in
+          let rec pow_int base exp acc =
+            if exp = 0 then acc
+            else pow_int base (exp - 1) (acc * base)
+          in
+          Ok (pow_int v1 v2 1)
 
 exception ListTooShort
 exception InvalidArg
