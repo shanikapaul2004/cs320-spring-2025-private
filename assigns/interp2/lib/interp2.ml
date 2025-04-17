@@ -55,8 +55,119 @@ and desugar_expr (e : sfexpr) : expr =
              args)
   | SAssert e -> Assert (desugar_expr e)
 
+  let rec lookup (x : string) (ctx : (string * ty) list) : ty option =
+    match ctx with
+    | [] -> None
+    | (y, t) :: rest -> if x = y then Some t else lookup x rest  
 
-  let type_of (_ : expr) : (ty, error) result = assert false
+  let rec type_of_expr (ctx : (string * ty) list) (e : expr) : (ty, error) result =
+    match e with
+    | Unit -> Ok UnitTy
+    | Bool _ -> Ok BoolTy
+    | Num _ -> Ok IntTy
+    | Var x ->
+        (match lookup x ctx with
+         | Some t -> Ok t
+         | None -> Error (UnknownVar x))
+  
+         | Bop (op, e1, e2) ->
+          (match type_of_expr ctx e1 with
+           | Error e -> Error e
+           | Ok t1 ->
+               match type_of_expr ctx e2 with
+               | Error e -> Error e
+               | Ok t2 ->
+                   let int_ops = [Add; Sub; Mul; Div; Mod] in
+                   let comp_ops = [Lt; Lte; Gt; Gte; Eq; Neq] in
+                   let bool_ops = [And; Or] in
+                   if List.mem op int_ops then
+                     if t1 = IntTy then
+                       if t2 = IntTy then Ok IntTy
+                       else Error (OpTyErrR (op, IntTy, t2))
+                     else Error (OpTyErrL (op, IntTy, t1))
+                   else if List.mem op comp_ops then
+                     if t1 = IntTy then
+                       if t2 = IntTy then Ok BoolTy
+                       else Error (OpTyErrR (op, IntTy, t2))
+                     else Error (OpTyErrL (op, IntTy, t1))
+                   else if List.mem op bool_ops then
+                     if t1 = BoolTy then
+                       if t2 = BoolTy then Ok BoolTy
+                       else Error (OpTyErrR (op, BoolTy, t2))
+                     else Error (OpTyErrL (op, BoolTy, t1))
+                   else failwith "Unknown operator")
+      
+  
+    | If (e1, e2, e3) ->
+        (match type_of_expr ctx e1 with
+         | Error e -> Error e
+         | Ok t_cond ->
+             (match type_of_expr ctx e2 with
+              | Error e -> Error e
+              | Ok t_then ->
+                  (match type_of_expr ctx e3 with
+                   | Error e -> Error e
+                   | Ok t_else ->
+                       if t_cond <> BoolTy then Error (IfCondTyErr t_cond)
+                       else if t_then <> t_else then Error (IfTyErr (t_then, t_else))
+                       else Ok t_then)))
+  
+    | Fun (x, t_arg, body) ->
+        let ctx' = (x, t_arg) :: ctx in
+        (match type_of_expr ctx' body with
+         | Ok t_body -> Ok (FunTy (t_arg, t_body))
+         | Error e -> Error e)
+  
+    | App (e1, e2) ->
+        (match type_of_expr ctx e1 with
+         | Error e -> Error e
+         | Ok t_fun ->
+             (match type_of_expr ctx e2 with
+              | Error e -> Error e
+              | Ok t_arg ->
+                  match t_fun with
+                  | FunTy (t_expected, t_ret) ->
+                      if t_expected = t_arg then Ok t_ret
+                      else Error (FunArgTyErr (t_expected, t_arg))
+                  | _ -> Error (FunAppTyErr t_fun)))
+  
+    | Let { is_rec = false; name; ty; binding; body } ->
+        (match type_of_expr ctx binding with
+         | Error e -> Error e
+         | Ok t_binding ->
+             if t_binding = ty then
+               type_of_expr ((name, ty) :: ctx) body
+             else Error (LetTyErr (ty, t_binding)))
+  
+    | Let { is_rec = true; name; ty; binding; body } ->
+        (match binding with
+         | Fun (arg, t_arg, e_body) ->
+             let t_fn = ty in
+             let ctx' = (name, t_fn) :: ctx in
+             let ctx_body = (arg, t_arg) :: ctx' in
+             (match type_of_expr ctx_body e_body with
+              | Error e -> Error e
+              | Ok t_body ->
+                  (match t_fn with
+                   | FunTy (t1, t2) ->
+                       if t1 = t_arg && t2 = t_body then
+                         type_of_expr ctx' body
+                       else Error (LetTyErr (ty, FunTy (t_arg, t_body)))
+                   | _ -> Error (LetRecErr name)))
+         | _ -> Error (LetRecErr name))
+  
+    | Assert e ->
+        (match type_of_expr ctx e with
+         | Error e -> Error e
+         | Ok BoolTy -> Ok UnitTy
+         | Ok t -> Error (AssertTyErr t))
+  
+  let type_of (e : expr) : (ty, error) result =
+    type_of_expr [] e
+  
+  
+
+  
 
   exception AssertFail
   exception DivByZero
