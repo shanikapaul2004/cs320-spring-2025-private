@@ -164,14 +164,82 @@ and desugar_expr (e : sfexpr) : expr =
   
   let type_of (e : expr) : (ty, error) result =
     type_of_expr [] e
-  
-  
-
-  
 
   exception AssertFail
   exception DivByZero
   
-  let eval (_ : expr) :  value = assert false
+  let rec eval_expr (env : dyn_env) (e : expr) : value =
+    match e with
+    | Unit -> VUnit
+    | Bool b -> VBool b
+    | Num n -> VNum n
+    | Var x ->
+        (match Env.find_opt x env with
+         | Some v -> v
+         | None -> failwith ("Unbound variable: " ^ x))
+  
+    | Bop (op, e1, e2) ->
+        let v1 = eval_expr env e1 in
+        let v2 = eval_expr env e2 in
+        (match (op, v1, v2) with
+         | (Add, VNum n1, VNum n2) -> VNum (n1 + n2)
+         | (Sub, VNum n1, VNum n2) -> VNum (n1 - n2)
+         | (Mul, VNum n1, VNum n2) -> VNum (n1 * n2)
+         | (Div, VNum _, VNum 0) -> raise DivByZero
+         | (Div, VNum n1, VNum n2) -> VNum (n1 / n2)
+         | (Mod, VNum _, VNum 0) -> raise DivByZero
+         | (Mod, VNum n1, VNum n2) -> VNum (n1 mod n2)
+         | (Lt, VNum n1, VNum n2) -> VBool (n1 < n2)
+         | (Lte, VNum n1, VNum n2) -> VBool (n1 <= n2)
+         | (Gt, VNum n1, VNum n2) -> VBool (n1 > n2)
+         | (Gte, VNum n1, VNum n2) -> VBool (n1 >= n2)
+         | (Eq, VNum n1, VNum n2) -> VBool (n1 = n2)
+         | (Neq, VNum n1, VNum n2) -> VBool (n1 <> n2)
+         | (And, VBool b1, VBool b2) -> VBool (b1 && b2)
+         | (Or, VBool b1, VBool b2) -> VBool (b1 || b2)
+         | _ -> failwith "Invalid operands")
+  
+    | If (e1, e2, e3) ->
+        (match eval_expr env e1 with
+         | VBool true -> eval_expr env e2
+         | VBool false -> eval_expr env e3
+         | _ -> failwith "Non-boolean condition")
+  
+    | Fun (x, _, body) ->
+        VClos { arg = x; body; env; name = None }
+  
+    | App (e1, e2) ->
+        let f = eval_expr env e1 in
+        let arg_val = eval_expr env e2 in
+        (match f with
+         | VClos { arg; body; env = clos_env; name = None } ->
+             let env' = Env.add arg arg_val clos_env in
+             eval_expr env' body
+         | VClos { arg; body; env = clos_env; name = Some fname } ->
+             let env' = Env.add fname f (Env.add arg arg_val clos_env) in
+             eval_expr env' body
+         | _ -> failwith "Tried to apply a non-function")
+  
+    | Let { is_rec = false; name; binding; body; _ } ->
+        let bound_val = eval_expr env binding in
+        let env' = Env.add name bound_val env in
+        eval_expr env' body
+  
+    | Let { is_rec = true; name; binding; body; _ } ->
+        (match binding with
+         | Fun (x, _, e_body) ->
+             let rec_clos = VClos { arg = x; body = e_body; env; name = Some name } in
+             let env' = Env.add name rec_clos env in
+             eval_expr env' body
+         | _ -> failwith "let rec must bind a function")
+  
+    | Assert e ->
+        (match eval_expr env e with
+         | VBool true -> VUnit
+         | VBool false -> raise AssertFail
+         | _ -> failwith "Non-boolean assert")
+  
+  let eval (e : expr) : value =
+    eval_expr Env.empty e
   
   let interp (_ : string) : (value, error) result = assert false
