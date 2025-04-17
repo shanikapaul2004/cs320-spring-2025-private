@@ -267,6 +267,12 @@ and desugar_expr (e : sfexpr) : expr =
               with
               | DivByZero -> Error (OpTyErrR (Div, IntTy, IntTy))
               | AssertFail -> Error (AssertTyErr BoolTy)
+              | Failure msg when String.starts_with ~prefix:"Unbound variable" msg ->
+                  let var = String.sub msg 18 (String.length msg - 18) in
+                  Error (UnknownVar var)
+              | _ -> Error ParseErr  (* last resort fallback *)
+    
+    
     
     
     
