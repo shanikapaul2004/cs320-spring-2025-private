@@ -242,4 +242,12 @@ and desugar_expr (e : sfexpr) : expr =
   let eval (e : expr) : value =
     eval_expr Env.empty e
   
-  let interp (_ : string) : (value, error) result = assert false
+    let interp (s : string) : (value, error) result =
+      match parse s with
+      | None -> Error ParseErr
+      | Some prog ->
+          let desugared = desugar prog in
+          match type_of desugared with
+          | Error e -> Error e
+          | Ok _ -> Ok (eval desugared)
+    
