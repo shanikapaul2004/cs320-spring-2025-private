@@ -262,7 +262,12 @@ and desugar_expr (e : sfexpr) : expr =
           let core_expr = desugar prog in
           match type_of core_expr with
           | Error e -> Error e
-          | Ok _ -> Ok (eval core_expr)
+          | Ok _ ->
+              try Ok (eval core_expr)
+              with
+              | DivByZero -> Error (OpTyErrR (Div, IntTy, IntTy))
+              | AssertFail -> Error (AssertTyErr BoolTy)
+    
     
     
     
