@@ -246,8 +246,10 @@ and desugar_expr (e : sfexpr) : expr =
       match parse s with
       | None -> Error ParseErr
       | Some prog ->
-          let desugared = desugar prog in
-          match type_of desugared with
+          let core_expr = desugar prog in
+          match type_of core_expr with
           | Error e -> Error e
-          | Ok _ -> Ok (eval desugared)
+          | Ok _ -> Ok (eval core_expr)
+    
+    
     
