@@ -10,28 +10,27 @@ let rec desugar (p : prog) : expr =
   | [] -> Unit
   | stmts -> desugar_stmts stmts
 
-and desugar_stmts (stmts : toplet list) : expr =
-  match stmts with
-  | [] -> Unit
-  | [stmt] ->
-      let { is_rec; name; args; ty; binding } = stmt in
-      let fn_expr = desugar_function args (desugar_expr binding) in
-      let fn_ty =
-        match args with
-        | [] -> ty
-        | _ -> List.fold_right (fun (_, t_arg) acc -> FunTy (t_arg, acc)) args ty
-      in
-      let body = if name = "_" then Unit else Var name in
-      Let { is_rec; name; ty = fn_ty; binding = fn_expr; body }
-  | stmt :: rest ->
-      let { is_rec; name; args; ty; binding } = stmt in
-      let fn_expr = desugar_function args (desugar_expr binding) in
-      let fn_ty =
-        match args with
-        | [] -> ty
-        | _ -> List.fold_right (fun (_, t_arg) acc -> FunTy (t_arg, acc)) args ty
-      in
-      Let { is_rec; name; ty = fn_ty; binding = fn_expr; body = desugar_stmts rest }
+  and desugar_stmts (stmts : toplet list) : expr =
+    match stmts with
+    | [] -> Unit
+    | [stmt] ->
+        let { is_rec; name; args; ty; binding } = stmt in
+        let fn_expr = desugar_function args (desugar_expr binding) in
+        let fn_ty =
+          match args with
+          | [] -> ty
+          | _ -> List.fold_right (fun (_, t_arg) acc -> FunTy (t_arg, acc)) args ty
+        in
+        Let { is_rec; name; ty = fn_ty; binding = fn_expr; body = Var name }
+    | stmt :: rest ->
+        let { is_rec; name; args; ty; binding } = stmt in
+        let fn_expr = desugar_function args (desugar_expr binding) in
+        let fn_ty =
+          match args with
+          | [] -> ty
+          | _ -> List.fold_right (fun (_, t_arg) acc -> FunTy (t_arg, acc)) args ty
+        in
+        Let { is_rec; name; ty = fn_ty; binding = fn_expr; body = desugar_stmts rest }
 
 and desugar_function (args : (string * ty) list) (body : expr) : expr =
   match args with
@@ -284,9 +283,11 @@ and desugar_expr (e : sfexpr) : expr =
           match type_of expr with
           | Error e -> Error e
           | Ok _ ->
-              (* Note: We're NOT catching DivByZero or AssertFail exceptions here *)
-              try Ok (eval expr)
+              try 
+                Ok (eval expr)
               with
+              | DivByZero -> Error (UnknownVar "Division by zero")
+              | AssertFail -> Error (UnknownVar "Assertion failure")  (* Return an error for assertion failures *)
               | Failure msg ->
                   let prefix = "Unbound variable: " in
                   let plen = String.length prefix in
@@ -295,9 +296,6 @@ and desugar_expr (e : sfexpr) : expr =
                     Error (UnknownVar var)
                   else Error ParseErr
               | _ -> Error ParseErr
-    
-    
-    
     
     
     
