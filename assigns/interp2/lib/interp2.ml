@@ -16,14 +16,14 @@ let rec desugar (p : prog) : expr =
     | [stmt] ->
         let { is_rec; name; args; ty; binding } = stmt in
         let fn_expr = desugar_function args (desugar_expr binding) in
-        let body =
-          if name = "_" then Unit else Var name
-        in
-        Let { is_rec; name; ty; binding = fn_expr; body }
+        let fn_ty = List.fold_right (fun (_, t_arg) acc -> FunTy (t_arg, acc)) args ty in
+        let body = if name = "_" then Unit else Var name in
+        Let { is_rec; name; ty = fn_ty; binding = fn_expr; body }
     | stmt :: rest ->
         let { is_rec; name; args; ty; binding } = stmt in
         let fn_expr = desugar_function args (desugar_expr binding) in
-        Let { is_rec; name; ty; binding = fn_expr; body = desugar_stmts rest }  
+        let fn_ty = List.fold_right (fun (_, t_arg) acc -> FunTy (t_arg, acc)) args ty in
+        Let { is_rec; name; ty = fn_ty; binding = fn_expr; body = desugar_stmts rest }  
   
 
 and desugar_function (args : (string * ty) list) (body : expr) : expr =
@@ -279,6 +279,7 @@ and desugar_expr (e : sfexpr) : expr =
                     Error (UnknownVar var)
                   else Error ParseErr
               | _ -> Error ParseErr
+    
     
     
     
