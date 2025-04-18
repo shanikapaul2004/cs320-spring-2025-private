@@ -256,14 +256,17 @@ and desugar_expr (e : sfexpr) : expr =
         let env' = Env.add name bound_val env in
         eval_expr env' body
   
-    | Let { is_rec = true; name; binding; body; _ } ->
-        (match binding with
-         | Fun (x, _, e_body) ->
-             let rec_clos = VClos { arg = x; body = e_body; env; name = Some name } in
-             let env' = Env.add name rec_clos env in
-             eval_expr env' body
-         | _ -> failwith "let rec must bind a function")
-  
+        | Let { is_rec = true; name; binding; body; _ } ->
+          (match binding with
+           | Fun (x, _, e_body) ->
+               let rec_env = ref Env.empty in
+               let rec_clos = VClos { arg = x; body = e_body; env = !rec_env; name = Some name } in
+               let env' = Env.add name rec_clos env in
+               rec_env := env';
+               eval_expr env' body
+           | _ -> failwith "let rec must bind a function")
+      
+
     | Assert e ->
         (match eval_expr env e with
          | VBool true -> VUnit
