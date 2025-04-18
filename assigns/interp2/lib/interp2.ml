@@ -12,16 +12,19 @@ let rec desugar (p : prog) : expr =
 
   and desugar_stmts (stmts : toplet list) : expr =
     match stmts with
-    | [] -> failwith "empty program"
+    | [] -> Unit
     | [stmt] ->
         let { is_rec; name; args; ty; binding } = stmt in
-        let body = Var name in
         let fn_expr = desugar_function args (desugar_expr binding) in
+        let body =
+          if name = "_" then Unit else Var name
+        in
         Let { is_rec; name; ty; binding = fn_expr; body }
     | stmt :: rest ->
         let { is_rec; name; args; ty; binding } = stmt in
         let fn_expr = desugar_function args (desugar_expr binding) in
         Let { is_rec; name; ty; binding = fn_expr; body = desugar_stmts rest }  
+  
 
 and desugar_function (args : (string * ty) list) (body : expr) : expr =
   match args with
