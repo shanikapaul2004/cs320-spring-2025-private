@@ -284,10 +284,9 @@ and desugar_expr (e : sfexpr) : expr =
           match type_of expr with
           | Error e -> Error e
           | Ok _ ->
+              (* Note: We're NOT catching DivByZero or AssertFail exceptions here *)
               try Ok (eval expr)
               with
-              | DivByZero -> Error (UnknownVar "Division by zero")
-              | AssertFail -> Error (UnknownVar "Assert failed")
               | Failure msg ->
                   let prefix = "Unbound variable: " in
                   let plen = String.length prefix in
