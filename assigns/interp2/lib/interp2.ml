@@ -10,17 +10,18 @@ let rec desugar (p : prog) : expr =
   | [] -> Unit
   | stmts -> desugar_stmts stmts
 
-and desugar_stmts (stmts : toplet list) : expr =
-  match stmts with
-  | [] -> Unit
-  | [{is_rec; name; args; ty; binding}] ->
-      let desugared_body = desugar_expr binding in
-      let fn_expr = desugar_function args desugared_body in
-      Let { is_rec; name; ty; binding = fn_expr; body = Var name }
-  | {is_rec; name; args; ty; binding} :: rest ->
-      let desugared_body = desugar_expr binding in
-      let fn_expr = desugar_function args desugared_body in
-      Let { is_rec; name; ty; binding = fn_expr; body = desugar_stmts rest }
+  and desugar_stmts (stmts : toplet list) : expr =
+    match stmts with
+    | [] -> failwith "empty program"
+    | [stmt] ->
+        let { is_rec; name; args; ty; binding } = stmt in
+        let body = Var name in
+        let fn_expr = desugar_function args (desugar_expr binding) in
+        Let { is_rec; name; ty; binding = fn_expr; body }
+    | stmt :: rest ->
+        let { is_rec; name; args; ty; binding } = stmt in
+        let fn_expr = desugar_function args (desugar_expr binding) in
+        Let { is_rec; name; ty; binding = fn_expr; body = desugar_stmts rest }  
 
 and desugar_function (args : (string * ty) list) (body : expr) : expr =
   match args with
@@ -267,10 +268,14 @@ and desugar_expr (e : sfexpr) : expr =
               with
               | DivByZero -> Error (OpTyErrR (Div, IntTy, IntTy))
               | AssertFail -> Error (AssertTyErr BoolTy)
-              | Failure msg when String.starts_with ~prefix:"Unbound variable" msg ->
-                  let var = String.sub msg 18 (String.length msg - 18) in
-                  Error (UnknownVar var)
-              | _ -> Error ParseErr  (* last resort fallback *)
+              | Failure msg ->
+                  let prefix = "Unbound variable: " in
+                  let plen = String.length prefix in
+                  if String.length msg >= plen && String.sub msg 0 plen = prefix then
+                    let var = String.sub msg plen (String.length msg - plen) in
+                    Error (UnknownVar var)
+                  else Error ParseErr
+              | _ -> Error ParseErr
     
     
     
