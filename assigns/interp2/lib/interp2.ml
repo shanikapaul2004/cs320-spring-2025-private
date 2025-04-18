@@ -197,39 +197,38 @@ and desugar_expr (e : sfexpr) : expr =
          | Some v -> v
          | None -> failwith ("Unbound variable: " ^ x))
   
-         | Bop (And, e1, e2) ->
-          (match eval_expr env e1 with
-           | VBool false -> VBool false
-           | VBool true -> eval_expr env e2
-           | _ -> failwith "Invalid AND")
-      
-      | Bop (Or, e1, e2) ->
-          (match eval_expr env e1 with
-           | VBool true -> VBool true
-           | VBool false -> eval_expr env e2
-           | _ -> failwith "Invalid OR")
-      
-      | Bop (op, e1, e2) ->
-          let v1 = eval_expr env e1 in
-          let v2 = eval_expr env e2 in
-          (match (op, v1, v2) with
-           | (Add, VNum n1, VNum n2) -> VNum (n1 + n2)
-           | (Sub, VNum n1, VNum n2) -> VNum (n1 - n2)
-           | (Mul, VNum n1, VNum n2) -> VNum (n1 * n2)
-           | (Div, VNum _, VNum 0) -> raise DivByZero
-           | (Div, VNum n1, VNum n2) -> VNum (n1 / n2)
-           | (Mod, VNum _, VNum 0) -> raise DivByZero
-           | (Mod, VNum n1, VNum n2) -> VNum (n1 mod n2)
-           | (Lt, VNum n1, VNum n2) -> VBool (n1 < n2)
-           | (Lte, VNum n1, VNum n2) -> VBool (n1 <= n2)
-           | (Gt, VNum n1, VNum n2) -> VBool (n1 > n2)
-           | (Gte, VNum n1, VNum n2) -> VBool (n1 >= n2)
-           | (Eq, VNum n1, VNum n2) -> VBool (n1 = n2)
-           | (Neq, VNum n1, VNum n2) -> VBool (n1 <> n2)
-           | (Eq, VBool b1, VBool b2) -> VBool (b1 = b2)
-           | (Neq, VBool b1, VBool b2) -> VBool (b1 <> b2)
-           | _ -> failwith "Invalid operands")
-      
+    | Bop (And, e1, e2) ->
+        (match eval_expr env e1 with
+         | VBool false -> VBool false
+         | VBool true -> eval_expr env e2
+         | _ -> failwith "Invalid AND")
+  
+    | Bop (Or, e1, e2) ->
+        (match eval_expr env e1 with
+         | VBool true -> VBool true
+         | VBool false -> eval_expr env e2
+         | _ -> failwith "Invalid OR")
+  
+    | Bop (op, e1, e2) ->
+        let v1 = eval_expr env e1 in
+        let v2 = eval_expr env e2 in
+        (match (op, v1, v2) with
+         | (Add, VNum n1, VNum n2) -> VNum (n1 + n2)
+         | (Sub, VNum n1, VNum n2) -> VNum (n1 - n2)
+         | (Mul, VNum n1, VNum n2) -> VNum (n1 * n2)
+         | (Div, VNum _, VNum 0) -> raise DivByZero
+         | (Div, VNum n1, VNum n2) -> VNum (n1 / n2)
+         | (Mod, VNum _, VNum 0) -> raise DivByZero
+         | (Mod, VNum n1, VNum n2) -> VNum (n1 mod n2)
+         | (Lt, VNum n1, VNum n2) -> VBool (n1 < n2)
+         | (Lte, VNum n1, VNum n2) -> VBool (n1 <= n2)
+         | (Gt, VNum n1, VNum n2) -> VBool (n1 > n2)
+         | (Gte, VNum n1, VNum n2) -> VBool (n1 >= n2)
+         | (Eq, VNum n1, VNum n2) -> VBool (n1 = n2)
+         | (Neq, VNum n1, VNum n2) -> VBool (n1 <> n2)
+         | (Eq, VBool b1, VBool b2) -> VBool (b1 = b2)
+         | (Neq, VBool b1, VBool b2) -> VBool (b1 <> b2)
+         | _ -> failwith "Invalid operands")
   
     | If (e1, e2, e3) ->
         (match eval_expr env e1 with
@@ -269,7 +268,7 @@ and desugar_expr (e : sfexpr) : expr =
         (match eval_expr env e with
          | VBool true -> VUnit
          | VBool false -> raise AssertFail
-         | _ -> failwith "Non-boolean assert")
+         | _ -> failwith "Non-boolean assert")  
   
   let eval (e : expr) : value =
     eval_expr Env.empty e
