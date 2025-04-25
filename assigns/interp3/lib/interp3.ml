@@ -73,6 +73,13 @@ let rec unify_one (t1 : ty) (t2 : ty) : (string * ty) list option =
       
   | _, _ -> None  (* Type mismatch *)
 
+(* Compose two substitutions, ensuring full variable resolution *)
+let compose_subst (s1 : (string * ty) list) (s2 : (string * ty) list) : (string * ty) list =
+  (* Apply s2 to the range of s1 *)
+  let s1' = List.map (fun (x, t) -> (x, apply_subst s2 t)) s1 in
+  (* Add all bindings from s2 *)
+  s1' @ s2
+
 (* Unify a list of constraints, returning a substitution *)
 let rec unify (cs : constr list) : (string * ty) list option =
   match cs with
@@ -81,12 +88,14 @@ let rec unify (cs : constr list) : (string * ty) list option =
       match unify_one t1 t2 with
       | None -> None
       | Some subst1 ->
+          (* Apply subst1 to the remaining constraints *)
           let rest' = List.map (fun (t1, t2) -> 
                               (apply_subst subst1 t1, apply_subst subst1 t2)) rest in
           match unify rest' with
           | None -> None
           | Some subst2 -> 
-              Some (subst2 @ subst1)
+              (* Compose the substitutions to ensure full resolution *)
+              Some (compose_subst subst1 subst2)
 
 (* Get free type variables in a type *)
 let rec free_vars_ty (t : ty) : VarSet.t =
