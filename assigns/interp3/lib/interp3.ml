@@ -77,8 +77,12 @@ let rec unify_one (t1 : ty) (t2 : ty) : (string * ty) list option =
 let compose_subst (s1 : (string * ty) list) (s2 : (string * ty) list) : (string * ty) list =
   (* Apply s2 to the range of s1 *)
   let s1' = List.map (fun (x, t) -> (x, apply_subst s2 t)) s1 in
-  (* Add all bindings from s2 *)
-  s1' @ s2
+  
+  (* Add bindings from s2 that aren't already in s1 *)
+  let s2' = List.filter (fun (x, _) -> not (List.exists (fun (y, _) -> x = y) s1')) s2 in
+  
+  (* Combine both substitutions *)
+  s1' @ s2'
 
 (* Unify a list of constraints, returning a substitution *)
 let rec unify (cs : constr list) : (string * ty) list option =

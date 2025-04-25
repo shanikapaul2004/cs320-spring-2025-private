@@ -113,6 +113,65 @@ let test6 () =
   let cs = [teq (var_ty "a") int_ty; teq (var_ty "b") bool_ty] in
   test_principle_type ty cs (Some (Forall (VarSet.empty, (pair_ty int_ty bool_ty))))
 
+  (* Complex chained substitutions test *)
+let test7 () =
+  let ty = var_ty "d" in
+  let cs = [
+    teq (var_ty "d") (var_ty "c");
+    teq (var_ty "c") (fun_ty (var_ty "a") (var_ty "b"));
+    teq (var_ty "a") int_ty;
+    teq (var_ty "b") bool_ty
+  ] in
+  test_principle_type ty cs (Some (Forall (VarSet.empty, (fun_ty int_ty bool_ty))))
+
+(* Multiple variable substitutions in nested types *)
+let test8 () =
+  let ty = var_ty "x" in
+  let cs = [
+    teq (var_ty "x") (list_ty (fun_ty (var_ty "a") (var_ty "b")));
+    teq (var_ty "a") int_ty;
+    teq (var_ty "b") (var_ty "c");
+    teq (var_ty "c") bool_ty
+  ] in
+  test_principle_type ty cs (Some (Forall (VarSet.empty, (list_ty (fun_ty int_ty bool_ty)))))
+
+(* Higher-order function types with substitutions *)
+let test9 () =
+  let ty = var_ty "f" in
+  let cs = [
+    teq (var_ty "f") (fun_ty (fun_ty (var_ty "a") (var_ty "b")) (var_ty "c"));
+    teq (var_ty "a") int_ty;
+    teq (var_ty "b") bool_ty;
+    teq (var_ty "c") (var_ty "d");
+    teq (var_ty "d") (list_ty (var_ty "a"))
+  ] in
+  test_principle_type ty cs (Some (Forall (VarSet.empty, 
+    (fun_ty (fun_ty int_ty bool_ty) (list_ty int_ty)))))
+
+(* Test with reversed order of constraints *)
+let test10 () =
+  let ty = var_ty "c" in
+  let cs = [
+    teq (var_ty "b") bool_ty;
+    teq (var_ty "a") int_ty;
+    teq (var_ty "c") (fun_ty (var_ty "a") (var_ty "b"))
+  ] in
+  test_principle_type ty cs (Some (Forall (VarSet.empty, (fun_ty int_ty bool_ty))))
+
+(* Complex nested substitutions involving data structures *)
+let test11 () =
+  let ty = var_ty "r" in
+  let cs = [
+    teq (var_ty "r") (pair_ty (var_ty "a") (var_ty "b"));
+    teq (var_ty "a") (list_ty (var_ty "c"));
+    teq (var_ty "b") (option_ty (var_ty "d"));
+    teq (var_ty "c") (var_ty "e");
+    teq (var_ty "d") (var_ty "e");
+    teq (var_ty "e") int_ty
+  ] in
+  test_principle_type ty cs (Some (Forall (VarSet.empty, 
+    (pair_ty (list_ty int_ty) (option_ty int_ty)))))
+
 (* Run all tests *)
 let run_tests () =
   Printf.printf "Running principle_type tests...\n\n";
@@ -122,6 +181,12 @@ let run_tests () =
   test4 ();
   test5 ();
   test6 ();
+  Printf.printf "\nAdditional complex tests:\n";
+  test7 ();
+  test8 ();
+  test9 ();
+  test10 ();
+  test11 ();
   Printf.printf "\nTests completed.\n"
 
 let () = run_tests ()
