@@ -6,17 +6,22 @@ let parse (s : string) : prog option =
   | exception _ -> None
 
 (* Apply a substitution to a type *)
-let rec apply_subst (subst : (string * ty) list) (t : ty) : ty =
-  match t with
-  | TUnit | TInt | TFloat | TBool -> t
-  | TVar x -> 
-      (match List.assoc_opt x subst with
-       | Some ty -> ty
-       | None -> TVar x)
-  | TFun (t1, t2) -> TFun (apply_subst subst t1, apply_subst subst t2)
-  | TPair (t1, t2) -> TPair (apply_subst subst t1, apply_subst subst t2)
-  | TList t -> TList (apply_subst subst t)
-  | TOption t -> TOption (apply_subst subst t)
+let apply_subst (subst : (string * ty) list) (t : ty) : ty =
+  let rec deep_apply t =
+    match t with
+    | TUnit | TInt | TFloat | TBool -> t
+    | TVar x -> 
+        (match List.assoc_opt x subst with
+         | Some ty -> 
+             (* Recursively apply substitutions to handle chains *)
+             let ty' = deep_apply ty in
+             if ty' = t then t else deep_apply ty'
+         | None -> TVar x)
+    | TFun (t1, t2) -> TFun (deep_apply t1, deep_apply t2)
+    | TPair (t1, t2) -> TPair (deep_apply t1, deep_apply t2)
+    | TList t -> TList (deep_apply t)
+    | TOption t -> TOption (deep_apply t)
+  in deep_apply t
 
 (* Check if a type variable appears in a type *)
 let rec occurs (x : string) (t : ty) : bool =
@@ -27,6 +32,17 @@ let rec occurs (x : string) (t : ty) : bool =
   | TPair (t1, t2) -> occurs x t1 || occurs x t2
   | TList t -> occurs x t
   | TOption t -> occurs x t
+
+(* Compose two substitutions, ensuring full variable resolution *)
+let compose_subst (s1 : (string * ty) list) (s2 : (string * ty) list) : (string * ty) list =
+  (* Apply s2 to the range of s1 *)
+  let s1' = List.map (fun (x, t) -> (x, apply_subst s2 t)) s1 in
+  
+  (* Add bindings from s2 that aren't already in s1 *)
+  let s2' = List.filter (fun (x, _) -> not (List.exists (fun (y, _) -> x = y) s1')) s2 in
+  
+  (* Combine both substitutions *)
+  s1' @ s2'
 
 (* Unify a single constraint, returning a substitution *)
 let rec unify_one (t1 : ty) (t2 : ty) : (string * ty) list option =
@@ -52,7 +68,7 @@ let rec unify_one (t1 : ty) (t2 : ty) : (string * ty) list option =
            match unify_one s2' t2' with
            | None -> None
            | Some subst2 -> 
-               Some (subst2 @ subst1))
+               Some (compose_subst subst1 subst2))
                
   | TPair (s1, s2), TPair (t1, t2) ->
       (match unify_one s1 t1 with
@@ -63,7 +79,7 @@ let rec unify_one (t1 : ty) (t2 : ty) : (string * ty) list option =
            match unify_one s2' t2' with
            | None -> None
            | Some subst2 -> 
-               Some (subst2 @ subst1))
+               Some (compose_subst subst1 subst2))
                
   | TList s, TList t ->
       unify_one s t
@@ -72,17 +88,6 @@ let rec unify_one (t1 : ty) (t2 : ty) : (string * ty) list option =
       unify_one s t
       
   | _, _ -> None  (* Type mismatch *)
-
-(* Compose two substitutions, ensuring full variable resolution *)
-let compose_subst (s1 : (string * ty) list) (s2 : (string * ty) list) : (string * ty) list =
-  (* Apply s2 to the range of s1 *)
-  let s1' = List.map (fun (x, t) -> (x, apply_subst s2 t)) s1 in
-  
-  (* Add bindings from s2 that aren't already in s1 *)
-  let s2' = List.filter (fun (x, _) -> not (List.exists (fun (y, _) -> x = y) s1')) s2 in
-  
-  (* Combine both substitutions *)
-  s1' @ s2'
 
 (* Unify a list of constraints, returning a substitution *)
 let rec unify (cs : constr list) : (string * ty) list option =
