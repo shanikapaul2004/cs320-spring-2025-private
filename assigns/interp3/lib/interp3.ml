@@ -133,11 +133,10 @@ let principle_type (ty : ty) (cs : constr list) : ty_scheme option =
         Some (Forall (free_vars, t'))
 
 (*interp3 after the check in*)
-
 let type_of (ctxt: stc_env) (e : expr) : ty_scheme option =
   (* Helper to infer type and collect constraints *)
-  let rec infer (env: stc_env) (e: expr) : (ty * constr list) =
-    match e with
+  let rec infer (env: stc_env) (expr: expr) : (ty * constr list) =
+    match expr with
     | Unit -> (TUnit, [])
     | Bool _ -> (TBool, [])
     | Int _ -> (TInt, [])
@@ -152,123 +151,127 @@ let type_of (ctxt: stc_env) (e : expr) : ty_scheme option =
         let (t, c) = infer env e in
         (TOption t, c)
     | Var x ->
-        (match Env.find_opt x env with
-         | Some scheme -> 
-             (* Instantiate type scheme with fresh variables *)
-             let Forall (vars, ty) = scheme in
-             let subst = VarSet.fold
-               (fun v acc -> (v, TVar (gensym ())) :: acc)
-               vars
-               [] in
-             (apply_subst subst ty, [])
-         | None -> failwith ("Unbound variable: " ^ x))
+        begin match Env.find_opt x env with
+        | Some (Forall (vars, t)) ->
+            (* Instantiate the type scheme with fresh variables *)
+            let subst = VarSet.fold 
+              (fun v acc -> (v, TVar (gensym ())) :: acc) 
+              vars 
+              [] in
+            (apply_subst subst t, [])
+        | None -> 
+            (* Variable not in environment *)
+            failwith ("Unbound variable: " ^ x)
+        end
     | Bop (op, e1, e2) ->
         let (t1, c1) = infer env e1 in
         let (t2, c2) = infer env e2 in
-        (match op with
-         | Add | Sub | Mul | Div | Mod -> 
-             (TInt, c1 @ c2 @ [(t1, TInt); (t2, TInt)])
-         | AddF | SubF | MulF | DivF | PowF -> 
-             (TFloat, c1 @ c2 @ [(t1, TFloat); (t2, TFloat)])
-         | Lt | Lte | Gt | Gte | Eq | Neq -> 
-             (TBool, c1 @ c2 @ [(t1, t2)])
-         | And | Or -> 
-             (TBool, c1 @ c2 @ [(t1, TBool); (t2, TBool)])
-         | Comma -> 
-             (TPair (t1, t2), c1 @ c2)
-         | Cons -> 
-             (t1, c1 @ c2 @ [(t2, TList t1); (t1, t1)]))
+        begin match op with
+        | Add | Sub | Mul | Div | Mod -> 
+            (TInt, c1 @ c2 @ [(t1, TInt); (t2, TInt)])
+        | AddF | SubF | MulF | DivF | PowF -> 
+            (TFloat, c1 @ c2 @ [(t1, TFloat); (t2, TFloat)])
+        | Lt | Lte | Gt | Gte | Eq | Neq -> 
+            (TBool, c1 @ c2 @ [(t1, t2)])
+        | And | Or -> 
+            (TBool, c1 @ c2 @ [(t1, TBool); (t2, TBool)])
+        | Comma -> 
+            (TPair (t1, t2), c1 @ c2)
+        | Cons -> 
+            (TList t1, c1 @ c2 @ [(t2, TList t1)])
+        end
     | If (e1, e2, e3) ->
         let (t1, c1) = infer env e1 in
         let (t2, c2) = infer env e2 in
         let (t3, c3) = infer env e3 in
         (t2, c1 @ c2 @ c3 @ [(t1, TBool); (t2, t3)])
     | Fun (x, ty_opt, body) ->
-        (match ty_opt with
-         | Some param_ty ->
-             let param_env = Env.add x (Forall (VarSet.empty, param_ty)) env in
-             let (return_ty, c) = infer param_env body in
-             (TFun (param_ty, return_ty), c)
-         | None ->
-             let param_ty = TVar (gensym ()) in
-             let param_env = Env.add x (Forall (VarSet.empty, param_ty)) env in
-             let (return_ty, c) = infer param_env body in
-             (TFun (param_ty, return_ty), c))
+        begin match ty_opt with
+        | Some param_ty ->
+            let param_env = Env.add x (Forall (VarSet.empty, param_ty)) env in
+            let (body_ty, c) = infer param_env body in
+            (TFun (param_ty, body_ty), c)
+        | None ->
+            let param_ty = TVar (gensym ()) in
+            let param_env = Env.add x (Forall (VarSet.empty, param_ty)) env in
+            let (body_ty, c) = infer param_env body in
+            (TFun (param_ty, body_ty), c)
+        end
     | App (e1, e2) ->
         let (t1, c1) = infer env e1 in
         let (t2, c2) = infer env e2 in
-        let alpha = TVar (gensym ()) in
-        (alpha, c1 @ c2 @ [(t1, TFun (t2, alpha))])
+        let result_ty = TVar (gensym ()) in
+        (result_ty, c1 @ c2 @ [(t1, TFun (t2, result_ty))])
     | Annot (e, ty) ->
         let (t, c) = infer env e in
         (ty, c @ [(t, ty)])
     | Assert e ->
-        (match e with
-         | Bool false -> 
-             let alpha = TVar (gensym ()) in
-             (alpha, [])
-         | _ ->
-             let (t, c) = infer env e in
-             (TUnit, c @ [(t, TBool)]))
+        begin match e with
+        | Bool false -> 
+            let alpha = TVar (gensym ()) in
+            (alpha, [])
+        | _ ->
+            let (t, c) = infer env e in
+            (TUnit, c @ [(t, TBool)])
+        end
     | Let { is_rec; name; binding; body } ->
         if is_rec then
           (* For recursive let-bindings *)
-          let alpha = TVar (gensym ()) in
-          let temp_env = Env.add name (Forall (VarSet.empty, alpha)) env in
-          let (binding_ty, binding_c) = infer temp_env binding in
-          
-          (* Check if binding is an anonymous function *)
-          let is_fun = match binding with
-                       | Fun (_, _, _) -> true
-                       | _ -> false in
-          
-          if not is_fun then
-            failwith "Recursive binding must be a function"
-          else
-            let constraints = binding_c @ [(alpha, binding_ty)] in
-            (match unify constraints with
-             | None -> failwith "Cannot unify constraints in recursive binding"
-             | Some subst ->
-                 let resolved_ty = apply_subst subst binding_ty in
-                 
-                 (* Find free type variables in the environment *)
-                 let free_in_env = Env.fold 
-                   (fun _ scheme acc -> 
-                     match scheme with
-                     | Forall (_, t) -> VarSet.union acc (free_vars_ty t))
-                   env
-                   VarSet.empty in
-                 
-                 (* Calculate which variables should be generalized *)
-                 let gen_vars = VarSet.diff (free_vars_ty resolved_ty) free_in_env in
-                 
-                 let binding_scheme = Forall (gen_vars, resolved_ty) in
-                 let new_env = Env.add name binding_scheme env in
-                 let (body_ty, body_c) = infer new_env body in
-                 (body_ty, binding_c @ body_c))
+          begin match binding with
+          | Fun _ ->
+              let alpha = TVar (gensym ()) in
+              let temp_env = Env.add name (Forall (VarSet.empty, alpha)) env in
+              let (binding_ty, binding_c) = infer temp_env binding in
+              let constraints = binding_c @ [(alpha, binding_ty)] in
+              
+              begin match unify constraints with
+              | None -> failwith "Cannot unify constraints in recursive binding"
+              | Some subst ->
+                  let resolved_ty = apply_subst subst binding_ty in
+                  
+                  (* Find free type variables in the environment *)
+                  let free_in_env = Env.fold 
+                    (fun _ scheme acc -> 
+                      match scheme with
+                      | Forall (_, t) -> VarSet.union acc (free_vars_ty t))
+                    env
+                    VarSet.empty in
+                  
+                  (* Calculate which variables should be generalized *)
+                  let gen_vars = VarSet.diff (free_vars_ty resolved_ty) free_in_env in
+                  
+                  let binding_scheme = Forall (gen_vars, resolved_ty) in
+                  let new_env = Env.add name binding_scheme env in
+                  let (body_ty, body_c) = infer new_env body in
+                  (body_ty, body_c)
+              end
+          | _ -> failwith "Recursive binding must be a function"
+          end
         else
           (* For non-recursive let-bindings *)
           let (binding_ty, binding_c) = infer env binding in
-          (match unify binding_c with
-           | None -> failwith "Cannot unify constraints in binding"
-           | Some subst ->
-               let resolved_ty = apply_subst subst binding_ty in
-               
-               (* Find free type variables in the environment *)
-               let free_in_env = Env.fold 
-                 (fun _ scheme acc -> 
-                   match scheme with
-                   | Forall (_, t) -> VarSet.union acc (free_vars_ty t))
-                 env
-                 VarSet.empty in
-               
-               (* Calculate which variables should be generalized *)
-               let gen_vars = VarSet.diff (free_vars_ty resolved_ty) free_in_env in
-               
-               let binding_scheme = Forall (gen_vars, resolved_ty) in
-               let new_env = Env.add name binding_scheme env in
-               let (body_ty, body_c) = infer new_env body in
-               (body_ty, binding_c @ body_c))
+          
+          begin match unify binding_c with
+          | None -> failwith "Cannot unify constraints in binding"
+          | Some subst ->
+              let resolved_ty = apply_subst subst binding_ty in
+              
+              (* Find free type variables in the environment *)
+              let free_in_env = Env.fold 
+                (fun _ scheme acc -> 
+                  match scheme with
+                  | Forall (_, t) -> VarSet.union acc (free_vars_ty t))
+                env
+                VarSet.empty in
+              
+              (* Calculate which variables should be generalized *)
+              let gen_vars = VarSet.diff (free_vars_ty resolved_ty) free_in_env in
+              
+              let binding_scheme = Forall (gen_vars, resolved_ty) in
+              let new_env = Env.add name binding_scheme env in
+              let (body_ty, body_c) = infer new_env body in
+              (body_ty, binding_c @ body_c)
+          end
     | ListMatch { matched; hd_name; tl_name; cons_case; nil_case } ->
         let (matched_ty, matched_c) = infer env matched in
         let element_ty = TVar (gensym ()) in
@@ -290,15 +293,15 @@ let type_of (ctxt: stc_env) (e : expr) : ty_scheme option =
         let (some_ty, some_c) = infer extended_env some_case in
         let (none_ty, none_c) = infer env none_case in
         
-        (some_ty, matched_c @ some_c @ none_c @ [(matched_ty, opt_ty); (some_ty, none_ty)])
+        (none_ty, matched_c @ some_c @ none_c @ [(matched_ty, opt_ty); (some_ty, none_ty)])
     | PairMatch { matched; fst_name; snd_name; case } ->
         let (matched_ty, matched_c) = infer env matched in
-        let alpha = TVar (gensym ()) in
-        let beta = TVar (gensym ()) in
-        let pair_ty = TPair (alpha, beta) in
+        let fst_ty = TVar (gensym ()) in
+        let snd_ty = TVar (gensym ()) in
+        let pair_ty = TPair (fst_ty, snd_ty) in
         
-        let extended_env = Env.add fst_name (Forall (VarSet.empty, alpha))
-                          (Env.add snd_name (Forall (VarSet.empty, beta)) env) in
+        let extended_env = Env.add fst_name (Forall (VarSet.empty, fst_ty))
+                          (Env.add snd_name (Forall (VarSet.empty, snd_ty)) env) in
         
         let (case_ty, case_c) = infer extended_env case in
         (case_ty, matched_c @ case_c @ [(matched_ty, pair_ty)])
