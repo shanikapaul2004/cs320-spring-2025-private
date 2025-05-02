@@ -134,304 +134,172 @@ let principle_type (ty : ty) (cs : constr list) : ty_scheme option =
 
 (*interp3 after the check in*)
 
-(* Type substitution function - replaces type variables with types in a target type *)
-let rec ty_replace (replacement : ty) (var_name : string) (in_type : ty) : ty =
-  match in_type with
-  | TUnit | TInt | TFloat | TBool -> 
-      (* Base types remain unchanged *)
-      in_type
-  | TVar tv_name -> 
-      (* Replace variable if it matches the target *)
-      if tv_name = var_name then replacement else in_type
-  | TFun (param_ty, return_ty) -> 
-      (* Recursively substitute in both parts of a function type *)
-      TFun (ty_replace replacement var_name param_ty, 
-            ty_replace replacement var_name return_ty)
-  | TPair (left_ty, right_ty) -> 
-      (* Recursively substitute in both parts of a pair type *)
-      TPair (ty_replace replacement var_name left_ty, 
-             ty_replace replacement var_name right_ty)
-  | TList element_ty -> 
-      (* Recursively substitute in element type *)
-      TList (ty_replace replacement var_name element_ty)
-  | TOption wrapped_ty -> 
-      (* Recursively substitute in wrapped type *)
-      TOption (ty_replace replacement var_name wrapped_ty)
+(* Substitute a type for a type variable in a given type expression *)
+let rec substitute_ty target_ty var_name ty =
+  match ty with
+  | TUnit | TInt | TFloat | TBool -> ty
+  | TVar v -> if v = var_name then target_ty else ty
+  | TFun (lhs, rhs) -> TFun (substitute_ty target_ty var_name lhs, substitute_ty target_ty var_name rhs)
+  | TPair (lhs, rhs) -> TPair (substitute_ty target_ty var_name lhs, substitute_ty target_ty var_name rhs)
+  | TList inner -> TList (substitute_ty target_ty var_name inner)
+  | TOption inner -> TOption (substitute_ty target_ty var_name inner)
 
-(* Create concrete instance from polymorphic type schema *)
-let make_concrete (Forall (quantified_vars, poly_type)) =
-  (* Create a fresh type variable for each quantified variable *)
-  let variable_mappings = VarSet.fold
-    (fun var_name mappings_acc ->
-      let fresh_type_var = TVar (gensym ()) in
-      (var_name, fresh_type_var) :: mappings_acc)
-    quantified_vars
-    []
-  in
-  
-  (* Apply all substitutions to get a fresh concrete type *)
-  List.fold_left
-    (fun current_type (var_name, new_var) -> 
-       apply_subst [(var_name, new_var)] current_type)
-    poly_type
-    variable_mappings
+(* Instantiate a polymorphic type scheme with fresh type variables *)
+let instantiate (Forall (vars, base_ty)) =
+  let fresh_subst = VarSet.fold (fun v acc -> (v, TVar (gensym ())) :: acc) vars [] in
+  List.fold_left (fun t (v, ty) -> apply_subst [(v, ty)] t) base_ty fresh_subst
 
-(* Convert monomorphic type to a type scheme by quantifying appropriate variables *)
-let make_polymorphic (context : stc_env) (monomorphic_type : ty) : ty_scheme =
-  (* Collect all free type variables from the environment *)
-  let env_type_vars = Env.fold
-    (fun _ scheme acc_vars ->
-      let (Forall (_, scheme_type)) = scheme in
-      VarSet.union (free_vars_ty scheme_type) acc_vars)
-    context
-    VarSet.empty
-  in
-  
-  (* Find variables that appear in the type but not in the environment context *)
-  let quantifiable_vars = VarSet.diff (free_vars_ty monomorphic_type) env_type_vars in
-  
-  (* Create polymorphic scheme with appropriate quantification *)
-  Forall (quantifiable_vars, monomorphic_type)
+(* Generalize a type with respect to the free type variables in the environment *)
+let generalize (env : stc_env) (ty : ty) : ty_scheme =
+  let env_fv = Env.fold (fun _ (Forall (_, t)) acc -> VarSet.union acc (free_vars_ty t)) env VarSet.empty in
+  let free_vars = VarSet.diff (free_vars_ty ty) env_fv in
+  Forall (free_vars, ty)
 
-(* Main type inference algorithm *)
-let rec analyze_type (ctx : stc_env) (expression : expr) : (ty * constr list) option = 
-  match expression with
-  (* Basic literals *)
-  | Unit -> 
-      Some (TUnit, [])
-  | Bool _ -> 
-      Some (TBool, [])
-  | Int _ -> 
-      Some (TInt, [])
-  | Float _ -> 
-      Some (TFloat, [])
-      
-  (* Variable reference - look up in context *)
-  | Var name -> 
-      (match Env.find_opt name ctx with 
-       | Some type_scheme -> 
-           let concrete_type = make_concrete type_scheme in
-           Some (concrete_type, [])
+(* Main inference function *)
+let rec infer_expr (env : stc_env) (e : expr) : (ty * constr list) option =
+  let fresh_var () = TVar (gensym ()) in
+  match e with
+  | Unit -> Some (TUnit, [])
+  | Bool _ -> Some (TBool, [])
+  | Int _ -> Some (TInt, [])
+  | Float _ -> Some (TFloat, [])
+  | Nil -> Some (TList (fresh_var ()), [])
+  | ENone -> Some (TOption (fresh_var ()), [])
+  | Var x ->
+      (match Env.find_opt x env with
+       | Some scheme -> Some (instantiate scheme, [])
        | None -> None)
-       
-  (* Option constructors *)
-  | ENone -> 
-      let element_type = TVar (gensym ()) in
-      Some (TOption element_type, [])
-  | ESome inner_expr -> 
-      (match analyze_type ctx inner_expr with
-       | Some (inner_type, constraints) -> 
-           Some (TOption inner_type, constraints)
+  | ESome v ->
+      (match infer_expr env v with
+       | Some (t, c) -> Some (TOption t, c)
        | None -> None)
-       
-  (* Empty list constructor *)
-  | Nil -> 
-      let element_type = TVar (gensym ()) in
-      Some (TList element_type, [])
-      
-  (* Binary operators *)
-  | Bop (operator, left_expr, right_expr) -> 
-      (match analyze_type ctx left_expr, analyze_type ctx right_expr with
-       | Some (left_type, left_constraints), Some (right_type, right_constraints) ->
-           begin match operator with
-           (* Integer arithmetic *)
-           | Add | Sub | Mul | Div | Mod ->
-               Some (TInt, 
-                    (left_type, TInt) :: (right_type, TInt) :: 
-                    (left_constraints @ right_constraints))
-           (* Floating-point arithmetic *)
-           | AddF | SubF | MulF | DivF | PowF ->
-               Some (TFloat, 
-                    (left_type, TFloat) :: (right_type, TFloat) :: 
-                    (left_constraints @ right_constraints))
-           (* Comparison operators *)
-           | Eq | Neq | Lt | Lte | Gt | Gte ->
-               Some (TBool, 
-                    (left_type, right_type) :: 
-                    (left_constraints @ right_constraints))
-           (* Logical operators *)
-           | And | Or ->
-               Some (TBool, 
-                    (left_type, TBool) :: (right_type, TBool) :: 
-                    (left_constraints @ right_constraints))
-           (* List construction *)
-           | Cons ->
-               let element_type = TVar (gensym ()) in
-               Some (TList element_type, 
-                    (left_type, element_type) :: 
-                    (right_type, TList element_type) :: 
-                    (left_constraints @ right_constraints))
-           (* Tuple construction *)
-           | Comma ->
-               Some (TPair (left_type, right_type), 
-                    left_constraints @ right_constraints)
-           end
+  | Bop (op, e1, e2) ->
+      (match infer_expr env e1, infer_expr env e2 with
+       | Some (t1, c1), Some (t2, c2) ->
+           let constraints = match op with
+             | Add | Sub | Mul | Div | Mod -> [(t1, TInt); (t2, TInt)]
+             | AddF | SubF | MulF | DivF | PowF -> [(t1, TFloat); (t2, TFloat)]
+             | Eq | Neq | Lt | Lte | Gt | Gte -> [(t1, t2)]
+             | And | Or -> [(t1, TBool); (t2, TBool)]
+             | Cons ->
+                 let a = fresh_var () in
+                 [(t1, a); (t2, TList a)]
+             | Comma -> []
+           in
+           let result_ty = match op with
+             | Add | Sub | Mul | Div | Mod -> TInt
+             | AddF | SubF | MulF | DivF | PowF -> TFloat
+             | Eq | Neq | Lt | Lte | Gt | Gte | And | Or -> TBool
+             | Cons ->
+                 let a = match constraints with (a, _) :: _ -> a | _ -> fresh_var () in
+                 TList a
+             | Comma -> TPair (t1, t2)
+           in
+           Some (result_ty, c1 @ c2 @ constraints)
        | _ -> None)
-       
-  (* Conditional expression *)
-  | If (condition, then_branch, else_branch) -> 
-      (match analyze_type ctx condition, 
-             analyze_type ctx then_branch, 
-             analyze_type ctx else_branch with
-       | Some (cond_type, cond_constraints), 
-         Some (then_type, then_constraints), 
-         Some (else_type, else_constraints) ->
-           Some (else_type, 
-                (cond_type, TBool) :: (then_type, else_type) :: 
-                (cond_constraints @ then_constraints @ else_constraints))
+  | If (cond, thn, els) ->
+      (match infer_expr env cond, infer_expr env thn, infer_expr env els with
+       | Some (tc, cc), Some (tt, ct), Some (te, ce) ->
+           Some (te, (tc, TBool) :: (tt, te) :: (cc @ ct @ ce))
        | _ -> None)
-       
-  (* Assertions *)
-  | Assert assertion_expr -> 
-      if assertion_expr = Bool false then 
-        (* assert false can have any type *)
-        let result_type = TVar (gensym ()) in 
-        Some (result_type, []) 
-      else 
-        match analyze_type ctx assertion_expr with
-        | Some (assertion_type, assertion_constraints) -> 
-            Some (TUnit, (assertion_type, TBool) :: assertion_constraints)
-        | None -> None
-        
-  (* Type annotation *)
-  | Annot (inner_expr, expected_type) ->
-      (match analyze_type ctx inner_expr with
-       | Some (inferred_type, constraints) -> 
-           Some (expected_type, (inferred_type, expected_type) :: constraints)
+  | Assert inner ->
+      if inner = Bool false then Some (fresh_var (), [])
+      else
+        (match infer_expr env inner with
+         | Some (t, c) -> Some (TUnit, (t, TBool) :: c)
+         | None -> None)
+  | Annot (exp, annotated_ty) ->
+      (match infer_expr env exp with
+       | Some (t, c) -> Some (annotated_ty, (t, annotated_ty) :: c)
        | None -> None)
-       
-  (* Function abstraction *)
-  | Fun (param_name, param_type_opt, body_expr) ->
-      match param_type_opt with
-      | None ->
-          (* Unannotated parameter - generate fresh type variable *)
-          let param_type = TVar (gensym ()) in
-          let extended_ctx = Env.add param_name (Forall (VarSet.empty, param_type)) ctx in
-          (match analyze_type extended_ctx body_expr with
-           | Some (body_type, body_constraints) -> 
-               Some (TFun (param_type, body_type), body_constraints)
-           | None -> None)
-      | Some explicit_type ->
-          (* Use explicitly provided parameter type *)
-          let extended_ctx = Env.add param_name (Forall (VarSet.empty, explicit_type)) ctx in
-          (match analyze_type extended_ctx body_expr with
-           | Some (body_type, body_constraints) -> 
-               Some (TFun (explicit_type, body_type), body_constraints)
-           | None -> None)
-           
-  (* Function application *)
-  | App (func_expr, arg_expr) ->
-      (match analyze_type ctx func_expr, analyze_type ctx arg_expr with
-       | Some (func_type, func_constraints), Some (arg_type, arg_constraints) ->
-           let result_type = TVar (gensym ()) in
-           Some (result_type, 
-                (func_type, TFun (arg_type, result_type)) :: 
-                (func_constraints @ arg_constraints))
+  | Fun (x, ty_opt, body) ->
+      let param_ty = match ty_opt with
+        | Some t -> t
+        | None -> fresh_var ()
+      in
+      let env' = Env.add x (Forall (VarSet.empty, param_ty)) env in
+      (match infer_expr env' body with
+       | Some (t_body, c_body) -> Some (TFun (param_ty, t_body), c_body)
+       | None -> None)
+  | App (f, arg) ->
+      (match infer_expr env f, infer_expr env arg with
+       | Some (tf, cf), Some (ta, ca) ->
+           let res_ty = fresh_var () in
+           Some (res_ty, (tf, TFun (ta, res_ty)) :: (cf @ ca))
        | _ -> None)
-       
-  (* Non-recursive let binding *)
-  | Let { is_rec = false; name; binding; body } -> 
-      (match analyze_type ctx binding with
-       | Some (binding_type, binding_constraints) ->
-           let extended_ctx = Env.add name (Forall (VarSet.empty, binding_type)) ctx in
-           (match analyze_type extended_ctx body with
-            | Some (body_type, body_constraints) -> 
-                Some (body_type, binding_constraints @ body_constraints)
+  | Let { is_rec = false; name; binding; body } ->
+      (match infer_expr env binding with
+       | Some (t_b, c_b) ->
+           (match infer_expr (Env.add name (Forall (VarSet.empty, t_b)) env) body with
+            | Some (t_body, c_body) -> Some (t_body, c_b @ c_body)
             | None -> None)
        | None -> None)
-       
-  (* Recursive let binding *)
-  | Let { is_rec = true; name; binding; body } -> 
-      match binding with
-      | Fun _ ->
-          (* Create a placeholder type for the recursive function *)
-          let rec_type = TVar (gensym ()) in
-          let extended_ctx = Env.add name (Forall (VarSet.empty, rec_type)) ctx in
-          (match analyze_type extended_ctx binding with
-           | Some (binding_type, binding_constraints) ->
-               (match analyze_type extended_ctx body with
-                | Some (body_type, body_constraints) ->
-                    Some (body_type, 
-                         (binding_type, rec_type) :: 
-                         (binding_constraints @ body_constraints))
-                | None -> None)
-           | None -> None)
-      | _ -> None  (* Only functions can be recursive *)
-      
-  (* List pattern matching *)
+  | Let { is_rec = true; name; binding = Fun _ as func; body } ->
+      let alpha = fresh_var () in
+      let env' = Env.add name (Forall (VarSet.empty, alpha)) env in
+      (match infer_expr env' func with
+       | Some (t_func, c_func) ->
+           (match infer_expr env' body with
+            | Some (t_body, c_body) -> Some (t_body, (alpha, t_func) :: c_func @ c_body)
+            | None -> None)
+       | None -> None)
+  | Let { is_rec = true; _ } -> None
   | ListMatch { matched; hd_name; tl_name; cons_case; nil_case } ->
-      (match analyze_type ctx matched with
-       | Some (matched_type, matched_constraints) ->
-           let element_type = TVar (gensym ()) in
-           let cons_ctx = ctx
-             |> Env.add hd_name (Forall (VarSet.empty, element_type))
-             |> Env.add tl_name (Forall (VarSet.empty, TList element_type)) in
-           (match analyze_type cons_ctx cons_case, analyze_type ctx nil_case with
-            | Some (cons_type, cons_constraints), Some (nil_type, nil_constraints) ->
-                let result_type = TVar (gensym ()) in
-                Some (result_type, 
-                     (matched_type, TList element_type) :: 
-                     (cons_type, result_type) :: 
-                     (nil_type, result_type) :: 
-                     (matched_constraints @ cons_constraints @ nil_constraints)) 
+      (match infer_expr env matched with
+       | Some (t_list, c_match) ->
+           let elem_ty = fresh_var () in
+           let env' =
+             env
+             |> Env.add hd_name (Forall (VarSet.empty, elem_ty))
+             |> Env.add tl_name (Forall (VarSet.empty, TList elem_ty))
+           in
+           (match infer_expr env' cons_case, infer_expr env nil_case with
+            | Some (tc, cc), Some (tn, cn) ->
+                let result_ty = fresh_var () in
+                let constraints = [
+                  (t_list, TList elem_ty);
+                  (tc, result_ty);
+                  (tn, result_ty)
+                ] in
+                Some (result_ty, c_match @ cc @ cn @ constraints)
             | _ -> None)
        | None -> None)
-       
-  (* Option pattern matching *)
   | OptMatch { matched; some_name; some_case; none_case } ->
-      (match analyze_type ctx matched with
-       | Some (matched_type, matched_constraints) ->
-           let inner_type = TVar (gensym ()) in
-           let some_ctx = Env.add some_name (Forall (VarSet.empty, inner_type)) ctx in
-           (match analyze_type some_ctx some_case, analyze_type ctx none_case with
-            | Some (some_type, some_constraints), Some (none_type, none_constraints) ->
-                Some (none_type, 
-                     (matched_type, TOption inner_type) :: 
-                     (some_type, none_type) :: 
-                     (matched_constraints @ some_constraints @ none_constraints))
+      (match infer_expr env matched with
+       | Some (t_opt, c_match) ->
+           let opt_ty = fresh_var () in
+           let env' = Env.add some_name (Forall (VarSet.empty, opt_ty)) env in
+           (match infer_expr env' some_case, infer_expr env none_case with
+            | Some (ts, cs), Some (tn, cn) ->
+                Some (tn, (t_opt, TOption opt_ty) :: (ts, tn) :: c_match @ cs @ cn)
             | _ -> None)
        | None -> None)
-       
-  (* Pair pattern matching *)
   | PairMatch { matched; fst_name; snd_name; case } ->
-      (match analyze_type ctx matched with
-       | Some (matched_type, matched_constraints) ->
-           let first_type = TVar (gensym ()) in
-           let second_type = TVar (gensym ()) in
-           let pair_ctx =
-             ctx
-             |> Env.add fst_name (Forall (VarSet.empty, first_type))
-             |> Env.add snd_name (Forall (VarSet.empty, second_type)) in
-           (match analyze_type pair_ctx case with
-            | Some (case_type, case_constraints) ->
-                Some (case_type, 
-                     (matched_type, TPair (first_type, second_type)) :: 
-                     (matched_constraints @ case_constraints))
+      (match infer_expr env matched with
+       | Some (tpair, cpair) ->
+           let l = fresh_var () in
+           let r = fresh_var () in
+           let env' =
+             env
+             |> Env.add fst_name (Forall (VarSet.empty, l))
+             |> Env.add snd_name (Forall (VarSet.empty, r))
+           in
+           (match infer_expr env' case with
+            | Some (t_case, c_case) ->
+                Some (t_case, (tpair, TPair (l, r)) :: cpair @ c_case)
             | None -> None)
        | None -> None)
 
-(* Main type inference function *)
-let derive_type_scheme (context: stc_env) (expression : expr) : ty_scheme option = 
-  match analyze_type context expression with
-  | None -> 
-      (* Type inference failed *)
-      None
-  | Some (inferred_type, constraints) ->
-      (* Try to solve the collected type constraints *)
-      match unify constraints with
-      | None -> 
-          (* No solution found - expression is ill-typed *)
-          None
-      | Some substitutions ->
-          (* Apply substitutions to get the final concrete type *)
-          let final_type = List.fold_left 
-            (fun current_ty (var_name, replacement_ty) -> 
-              ty_replace replacement_ty var_name current_ty) 
-            inferred_type 
-            substitutions 
-          in
-          (* Generalize the type by quantifying appropriate variables *)
-          Some (make_polymorphic context final_type)
+(* Final type_of function *)
+let type_of (ctx : stc_env) (e : expr) : ty_scheme option =
+  match infer_expr ctx e with
+  | Some (ty, constraints) ->
+      (match unify constraints with
+       | Some subst ->
+           let final_ty = List.fold_left (fun t (x, t') -> substitute_ty t' x t) ty subst in
+           Some (generalize ctx final_ty)
+       | None -> None)
+  | None -> None
 
 (*type of function end *)
 
