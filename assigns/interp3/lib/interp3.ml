@@ -303,8 +303,34 @@ let type_of (ctx : stc_env) (e : expr) : ty_scheme option =
 
 (*type of function end *)
 
+let is_well_typed (p : prog) : bool =
+  let rec check env = function
+    | [] -> true
+    | { is_rec; name; binding } :: rest ->
+        if is_rec then
+          match binding with
+          | Fun (_, _, _) ->
+              (* Assign a fresh type var and extend env temporarily *)
+              let alpha = TVar (gensym ()) in
+              let temp_env = Env.add name (Forall (VarSet.empty, alpha)) env in
+              begin match type_of temp_env binding with
+              | Some (Forall (_, ty)) ->
+                  let scheme = generalize env ty in
+                  let new_env = Env.add name scheme env in
+                  check new_env rest
+              | None -> false
+              end
+          | _ -> false (* Cannot recursively define non-functions *)
+        else
+          match type_of env binding with
+          | Some (Forall (_, ty)) ->
+              let scheme = generalize env ty in
+              let new_env = Env.add name scheme env in
+              check new_env rest
+          | None -> false
+  in
+  check Env.empty p
 
-let is_well_typed (_p : prog) : bool = assert false
 
 exception AssertFail
 exception DivByZero
