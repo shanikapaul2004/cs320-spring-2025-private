@@ -1,13 +1,18 @@
 (* test_interp3.ml - Testing file for interp3 *)
 open Interp3
 
+(* Add counters for tracking passed and failed tests *)
+let passed = ref 0
+let failed = ref 0
+
 (* Helper function to convert a list of bindings to a static environment *)
 let ctx_to_env ctx =
   List.fold_left 
     (fun env (name, ty_scheme) -> Env.add name ty_scheme env) 
     Env.empty 
     ctx
-    
+
+(* Helper function to convert types to strings *)
 let rec string_of_ty = function
   | TUnit -> "TUnit"
   | TInt -> "TInt"
@@ -24,10 +29,13 @@ let test_type_of ?(ctx = []) name expr expected =
   let env = ctx_to_env ctx in
   match type_of env expr with
   | Some (Forall (_, ty)) when ty = expected ->
+      incr passed;
       Printf.printf "PASS: %s => %s\n" name (string_of_ty ty)
   | Some (Forall (_, ty)) ->
+      incr failed;
       Printf.printf "FAIL: %s => Got %s, Expected %s\n" name (string_of_ty ty) (string_of_ty expected)
   | None ->
+      incr failed;
       Printf.printf "FAIL: %s => Type inference failed\n" name
 
 (* Helper function to convert constraints to strings *)
@@ -46,17 +54,20 @@ let test_principle_type ty cs expected_result =
   let result = principle_type ty cs in
   let result_str = print_ty_scheme result in
   let expected_str = print_ty_scheme expected_result in
-  if result_str = expected_str then
+  if result_str = expected_str then (
+    incr passed;
     Printf.printf "PASS: principle_type %s %s = %s\n" 
       (string_of_ty ty) 
       (string_of_constrs cs) 
       result_str
-  else
+  ) else (
+    incr failed;
     Printf.printf "FAIL: principle_type %s %s\n  Expected: %s\n  Got: %s\n" 
       (string_of_ty ty) 
       (string_of_constrs cs) 
       expected_str 
       result_str
+  )
 
 (* Helper functions to create types and constraints *)
 let int_ty = TInt
@@ -345,6 +356,10 @@ let test_type_of_exprs () =
 
 (* Main function to run all tests *)
 let main () =
+  (* Reset counters *)
+  passed := 0;
+  failed := 0;
+
   Printf.printf "Running principle_type tests...\n\n";
   test1 ();
   test2 ();
@@ -358,6 +373,14 @@ let main () =
   test10 ();
   test11 ();
   
-  test_type_of_exprs ()
+  test_type_of_exprs ();
+  
+  (* Print summary *)
+  Printf.printf "\n--------- TEST SUMMARY ---------\n";
+  Printf.printf "PASSED: %d\n" !passed;
+  Printf.printf "FAILED: %d\n" !failed;
+  Printf.printf "TOTAL: %d\n" (!passed + !failed);
+  Printf.printf "Success rate: %.2f%%\n" 
+    (float_of_int !passed *. 100.0 /. float_of_int (!passed + !failed))
 
 let () = main ()
