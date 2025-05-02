@@ -336,7 +336,121 @@ exception AssertFail
 exception DivByZero
 exception CompareFunVals
 
-let eval_expr (_env : dyn_env) (_e : expr) : value = assert false
+let eval_binop op v1 v2 =
+  match op,v1,v2 with
+  | Add,   VInt a,   VInt b   -> VInt(a+b)
+  | Sub,   VInt a,   VInt b   -> VInt(a-b)
+  | Mul,   VInt a,   VInt b   -> VInt(a*b)
+  | Div,   VInt a,   VInt b   -> if b=0 then raise DivByZero else VInt(a/b)
+  | Mod,   VInt a,   VInt b   -> if b=0 then raise DivByZero else VInt(a mod b)
+  | AddF,  VFloat a, VFloat b -> VFloat(a+.b)
+  | SubF,  VFloat a, VFloat b -> VFloat(a-.b)
+  | MulF,  VFloat a, VFloat b -> VFloat(a*.b)
+  | DivF,  VFloat a, VFloat b -> VFloat(a/.b)
+  | PowF,  VFloat a, VFloat b -> VFloat(a**b)
+  | Lt,    VInt a,   VInt b   -> VBool(a<b)
+  | Lte,   VInt a,   VInt b   -> VBool(a<=b)
+  | Gt,    VInt a,   VInt b   -> VBool(a>b)
+  | Gte,   VInt a,   VInt b   -> VBool(a>=b)
+  | Eq,    x,        y        -> VBool(x=y)
+  | Neq,   x,        y        -> VBool(x<>y)
+  | And,   VBool a,  VBool b  -> VBool(a&&b)
+  | Or,    VBool a,  VBool b  -> VBool(a||b)
+  | Comma, x,        y        -> VPair(x,y)
+  | Cons,  x,        VList l  -> VList(x::l)
+  | _ -> failwith "Invalid operands"
+  
+  let rec eval_expr (env : dyn_env) (e : expr) : value =
+    match e with
+    | Unit -> VUnit
+    | Bool b -> VBool b
+    | Int n -> VInt n
+    | Float f -> VFloat f
+    | Var x -> 
+        (match Env.find_opt x env with
+        | Some v -> v
+        | None -> failwith ("Unbound variable: " ^ x))
+    | Fun (x, _, body) -> 
+        VClos { name = None; arg = x; body = body; env = env }
+    | App (f, a) ->
+        let vf = eval_expr env f in
+        let va = eval_expr env a in
+        (match vf with
+        | VClos { name = _; arg = x; body; env = clo_env } -> 
+            eval_expr (Env.add x va clo_env) body
+        | _ -> raise CompareFunVals)
+    | Let { is_rec = false; name; binding; body } -> 
+        let bv = eval_expr env binding in 
+        eval_expr (Env.add name bv env) body
+    | Let { is_rec = true; name; binding = Fun (x, _, b); body } ->
+        (* Create a reference cell for the recursive environment *)
+        let rec_env = ref env in
+        let closure = VClos { name = Some name; arg = x; body = b; env = !rec_env } in
+        rec_env := Env.add name closure env;
+        eval_expr (Env.add name closure env) body
+    | Let _ -> failwith "Recursion for non-function not supported"
+    | Annot (e, _) -> eval_expr env e
+    | Assert e -> 
+        (match eval_expr env e with 
+        | VBool true -> VUnit 
+        | VBool false -> raise AssertFail 
+        | _ -> failwith "Invalid assertion, expected boolean")
+    | If (c, t, e) -> 
+        (match eval_expr env c with 
+        | VBool true -> eval_expr env t 
+        | VBool false -> eval_expr env e 
+        | _ -> failwith "If condition must be boolean")
+    | Nil -> VList []
+    | ENone -> VNone
+    | ESome e -> VSome (eval_expr env e)
+    | Bop (op, e1, e2) ->
+        let v1 = eval_expr env e1 in
+        let v2 = eval_expr env e2 in
+        (match op with
+        | Add -> (match v1, v2 with VInt a, VInt b -> VInt (a + b) | _ -> failwith "Expected ints")
+        | Sub -> (match v1, v2 with VInt a, VInt b -> VInt (a - b) | _ -> failwith "Expected ints")
+        | Mul -> (match v1, v2 with VInt a, VInt b -> VInt (a * b) | _ -> failwith "Expected ints")
+        | Div -> (match v1, v2 with VInt a, VInt b -> 
+                  if b = 0 then raise DivByZero else VInt (a / b) | _ -> failwith "Expected ints")
+        | Mod -> (match v1, v2 with VInt a, VInt b -> 
+                  if b = 0 then raise DivByZero else VInt (a mod b) | _ -> failwith "Expected ints")
+        | AddF -> (match v1, v2 with VFloat a, VFloat b -> VFloat (a +. b) | _ -> failwith "Expected floats")
+        | SubF -> (match v1, v2 with VFloat a, VFloat b -> VFloat (a -. b) | _ -> failwith "Expected floats")
+        | MulF -> (match v1, v2 with VFloat a, VFloat b -> VFloat (a *. b) | _ -> failwith "Expected floats")
+        | DivF -> (match v1, v2 with VFloat a, VFloat b -> VFloat (a /. b) | _ -> failwith "Expected floats")
+        | PowF -> (match v1, v2 with VFloat a, VFloat b -> VFloat (a ** b) | _ -> failwith "Expected floats")
+        | Lt -> (match v1, v2 with 
+                 | VInt a, VInt b -> VBool (a < b) 
+                 | _ -> failwith "Expected comparable values")
+        | Lte -> (match v1, v2 with 
+                  | VInt a, VInt b -> VBool (a <= b) 
+                  | _ -> failwith "Expected comparable values")
+        | Gt -> (match v1, v2 with 
+                 | VInt a, VInt b -> VBool (a > b) 
+                 | _ -> failwith "Expected comparable values")
+        | Gte -> (match v1, v2 with 
+                  | VInt a, VInt b -> VBool (a >= b) 
+                  | _ -> failwith "Expected comparable values")
+        | Eq -> (try VBool (v1 = v2) with Invalid_argument _ -> raise CompareFunVals)
+        | Neq -> (try VBool (v1 <> v2) with Invalid_argument _ -> raise CompareFunVals)
+        | And -> (match v1, v2 with VBool a, VBool b -> VBool (a && b) | _ -> failwith "Expected booleans")
+        | Or -> (match v1, v2 with VBool a, VBool b -> VBool (a || b) | _ -> failwith "Expected booleans")
+        | Comma -> VPair (v1, v2)
+        | Cons -> (match v2 with VList l -> VList (v1 :: l) | _ -> failwith "Expected list"))
+    | ListMatch { matched; hd_name; tl_name; cons_case; nil_case } ->
+        (match eval_expr env matched with
+        | VList [] -> eval_expr env nil_case
+        | VList (h :: t) -> eval_expr (Env.add hd_name h (Env.add tl_name (VList t) env)) cons_case
+        | _ -> failwith "Expected list")
+    | OptMatch { matched; some_name; some_case; none_case } ->
+        (match eval_expr env matched with
+        | VSome v -> eval_expr (Env.add some_name v env) some_case
+        | VNone -> eval_expr env none_case
+        | _ -> failwith "Expected option")
+    | PairMatch { matched; fst_name; snd_name; case } ->
+        (match eval_expr env matched with
+        | VPair (v1, v2) -> eval_expr (Env.add fst_name v1 (Env.add snd_name v2 env)) case
+        | _ -> failwith "Expected pair")
 
 let eval p =
   let rec nest = function
@@ -344,6 +458,7 @@ let eval p =
     | [{is_rec;name;binding}] -> Let {is_rec;name;binding;body = Var name}
     | {is_rec;name;binding} :: ls -> Let {is_rec;name;binding;body = nest ls}
   in eval_expr Env.empty (nest p)
+        
 
 let interp input =
   match parse input with
