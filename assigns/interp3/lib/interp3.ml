@@ -177,7 +177,7 @@ let type_of (ctxt: stc_env) (e : expr) : ty_scheme option =
          | Comma -> 
              (TPair (t1, t2), c1 @ c2)
          | Cons -> 
-             (TList t1, c1 @ c2 @ [(t2, TList t1)]))
+             (t1, c1 @ c2 @ [(t2, TList t1); (t1, t1)]))
     | If (e1, e2, e3) ->
         let (t1, c1) = infer env e1 in
         let (t2, c2) = infer env e2 in
@@ -217,7 +217,7 @@ let type_of (ctxt: stc_env) (e : expr) : ty_scheme option =
           let temp_env = Env.add name (Forall (VarSet.empty, alpha)) env in
           let (binding_ty, binding_c) = infer temp_env binding in
           
-          (* Ensure binding is a function *)
+          (* Check if binding is an anonymous function *)
           let is_fun = match binding with
                        | Fun (_, _, _) -> true
                        | _ -> false in
@@ -230,14 +230,22 @@ let type_of (ctxt: stc_env) (e : expr) : ty_scheme option =
              | None -> failwith "Cannot unify constraints in recursive binding"
              | Some subst ->
                  let resolved_ty = apply_subst subst binding_ty in
+                 
+                 (* Find free type variables in the environment *)
                  let free_in_env = Env.fold 
-                   (fun _ (Forall (_, t)) acc -> VarSet.union acc (free_vars_ty t))
+                   (fun _ scheme acc -> 
+                     match scheme with
+                     | Forall (_, t) -> VarSet.union acc (free_vars_ty t))
                    env
                    VarSet.empty in
+                 
+                 (* Calculate which variables should be generalized *)
                  let gen_vars = VarSet.diff (free_vars_ty resolved_ty) free_in_env in
+                 
                  let binding_scheme = Forall (gen_vars, resolved_ty) in
                  let new_env = Env.add name binding_scheme env in
-                 infer new_env body)
+                 let (body_ty, body_c) = infer new_env body in
+                 (body_ty, binding_c @ body_c))
         else
           (* For non-recursive let-bindings *)
           let (binding_ty, binding_c) = infer env binding in
@@ -245,11 +253,18 @@ let type_of (ctxt: stc_env) (e : expr) : ty_scheme option =
            | None -> failwith "Cannot unify constraints in binding"
            | Some subst ->
                let resolved_ty = apply_subst subst binding_ty in
+               
+               (* Find free type variables in the environment *)
                let free_in_env = Env.fold 
-                 (fun _ (Forall (_, t)) acc -> VarSet.union acc (free_vars_ty t))
+                 (fun _ scheme acc -> 
+                   match scheme with
+                   | Forall (_, t) -> VarSet.union acc (free_vars_ty t))
                  env
                  VarSet.empty in
+               
+               (* Calculate which variables should be generalized *)
                let gen_vars = VarSet.diff (free_vars_ty resolved_ty) free_in_env in
+               
                let binding_scheme = Forall (gen_vars, resolved_ty) in
                let new_env = Env.add name binding_scheme env in
                let (body_ty, body_c) = infer new_env body in
@@ -278,14 +293,15 @@ let type_of (ctxt: stc_env) (e : expr) : ty_scheme option =
         (some_ty, matched_c @ some_c @ none_c @ [(matched_ty, opt_ty); (some_ty, none_ty)])
     | PairMatch { matched; fst_name; snd_name; case } ->
         let (matched_ty, matched_c) = infer env matched in
-        let fst_ty = TVar (gensym ()) in
-        let snd_ty = TVar (gensym ()) in
+        let alpha = TVar (gensym ()) in
+        let beta = TVar (gensym ()) in
+        let pair_ty = TPair (alpha, beta) in
         
-        let extended_env = Env.add fst_name (Forall (VarSet.empty, fst_ty))
-                          (Env.add snd_name (Forall (VarSet.empty, snd_ty)) env) in
+        let extended_env = Env.add fst_name (Forall (VarSet.empty, alpha))
+                          (Env.add snd_name (Forall (VarSet.empty, beta)) env) in
         
         let (case_ty, case_c) = infer extended_env case in
-        (case_ty, matched_c @ case_c @ [(matched_ty, TPair (fst_ty, snd_ty))])
+        (case_ty, matched_c @ case_c @ [(matched_ty, pair_ty)])
   in
   
   try
@@ -295,7 +311,6 @@ let type_of (ctxt: stc_env) (e : expr) : ty_scheme option =
   | Failure _ -> None
 
 (*type of function end *)
-
 
 
 let is_well_typed (_p : prog) : bool = assert false
